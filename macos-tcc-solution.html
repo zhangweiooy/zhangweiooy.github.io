@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CLI 工具 macOS TCC 权限方案</title>
+  <style>
+    body { margin:0; min-height:100vh; background:#0d1117; color:#c9d1d9; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+    nav { background:#161b22; padding:1rem 2rem; border-bottom:1px solid #30363d; }
+    nav a { color:#58a6ff; text-decoration:none; margin-right:1.5rem; }
+    nav a:hover { text-decoration:underline; }
+    article { max-width:800px; margin:2rem auto; padding:0 1rem; line-height:1.8; }
+    h1 { color:#58a6ff; }
+    h2 { color:#f0f6fc; margin-top:2rem; border-bottom:1px solid #30363d; padding-bottom:.3rem; }
+    h3 { color:#f0f6fc; margin-top:1.5rem; }
+    code { background:#161b22; padding:.2em .4em; border-radius:3px; font-size:.9em; }
+    pre { background:#161b22; padding:1rem; border-radius:6px; overflow-x:auto; }
+    pre code { background:none; padding:0; }
+    table { width:100%; border-collapse:collapse; margin:1rem 0; }
+    th, td { padding:.6rem .8rem; text-align:left; border:1px solid #30363d; }
+    th { background:#161b22; }
+    blockquote { border-left:3px solid #58a6ff; margin:1rem 0; padding:0 1rem; color:#8b949e; }
+    ul, ol { padding-left:1.5rem; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/macos-tcc-solution.html">macOS TCC</a>
+  </nav>
+  <article>
+    <h1>CLI 工具 macOS TCC 权限方案</h1>
+    <blockquote>基于 <a href="https://github.com/iFurySt/open-codex-computer-use">open-codex-computer-use</a> 项目的实践总结。解决 CLI 工具在 macOS 上 Accessibility / Screen Recording 权限授权不稳定、版本更新后丢失的问题。</blockquote>
+    <h2>问题根因</h2>
+    <ol>
+      <li><strong>没有 bundle ID</strong> — TCC 按文件路径匹配，路径不稳定（符号链接、不同包管理器路径不同），经常匹配失败</li>
+      <li><strong>ad-hoc 签名每次变化</strong> — 版本更新后 code identity 变了，TCC 不认识新版本，每次都要重新授权</li>
+      <li><strong>用户手动操作不可靠</strong> — 去系统设置里找隐私列表、点加号、手动拖入，流程太长，用户经常搞不定</li>
+    </ol>
+    <p>方案: <strong>.app bundle 结构 + Apple Development 免费签名 + 拖拽引导 UI + Unix socket agent proxy</strong>。</p>
+    <h2>架构</h2>
+    <pre><code>用户: your-tool &lt;command&gt;
+        |
+        v
+  your-tool-cli (CLI 壳，无权限)
+        |  Unix domain socket
+        v
+  YourTool.app agent 进程 (持 Accessibility + Screen Recording)
+        |
+        v
+  返回结果 -> stdout</code></pre>
+    <h2>参考仓库</h2>
+    <p>全部参考模板代码位于: <a href="https://github.com/iFurySt/open-codex-computer-use">github.com/iFurySt/open-codex-computer-use</a></p>
+    <h2>任务清单</h2>
+    <h3>1. .app bundle 结构</h3>
+    <p>新建 <code>YourTool.app/</code>，含 <code>Info.plist</code>、内嵌 agent 二进制、CLI 壳二进制。</p>
+    <p>参考: <code>scripts/build-open-computer-use-app.sh</code></p>
+    <table>
+      <tr><th>要点</th><th>参考行号</th></tr>
+      <tr><td><code>CFBundleIdentifier</code> 固定不变</td><td>-</td></tr>
+      <tr><td><code>LSUIElement = true</code> (无 Dock 图标)</td><td>-</td></tr>
+      <tr><td>Info.plist 模板生成</td><td>第 321-358 行</td></tr>
+      <tr><td><code>codesign_app_bundle()</code> 签名逻辑</td><td>第 205-232 行</td></tr>
+      <tr><td>dev/release bundle 隔离 (不同 bundle ID)</td><td>第 249-256 行</td></tr>
+    </table>
+    <h3>2. Apple Development 证书签名</h3>
+    <p>免费 Apple ID 在 <a href="https://developer.apple.com/account">developer.apple.com</a> 生成 <strong>Apple Development</strong> 证书，CI 中用该证书签名。</p>
+    <p>参考: <code>scripts/build-open-computer-use-app.sh</code></p>
+    <table>
+      <tr><th>要点</th><th>参考行号</th></tr>
+      <tr><td><code>resolve_codesign_identity()</code> 自动探测证书</td><td>第 163-203 行</td></tr>
+      <tr><td>CI 证书注入 (GitHub Secrets -> .p12 -> keychain)</td><td><code>.github/workflows/release.yml</code> 第 51-69 行</td></tr>
+    </table>
+    <h3>3. CLI 壳 + Agent Proxy</h3>
+    <p>CLI 壳负责启动/连接 agent 进程，通过 Unix domain socket 转发命令。</p>
+    <p>参考: <code>apps/OpenComputerUse/Sources/OpenComputerUse/MacOSAppAgentProxy.swift</code></p>
+    <table>
+      <tr><th>要点</th><th>参考行号</th></tr>
+      <tr><td>Agent 启动 <code>connectOrLaunchAgent()</code></td><td>第 76-108 行</td></tr>
+      <tr><td>CLI 请求代理 <code>sendCLIRequest()</code></td><td>第 127-145 行</td></tr>
+      <tr><td>Agent 命令分发 <code>AppAgentConnection.handle()</code></td><td>第 313-357 行</td></tr>
+      <tr><td>Socket 监听 <code>AppAgentSocketListener</code></td><td>第 211-289 行</td></tr>
+      <tr><td>Agent 过期检测 <code>isCurrentAgent()</code></td><td>第 517-536 行</td></tr>
+    </table>
+    <h3>4. 拖拽授权 UI</h3>
+    <p>首次执行 <code>your-tool doctor</code> 时检测权限。如果有缺失，弹出引导窗口，用户拖拽 app tile 到系统设置列表完成授权。</p>
+    <p>UI 参考: <code>apps/OpenComputerUse/Sources/OpenComputerUse/PermissionOnboardingApp.swift</code></p>
+    <table>
+      <tr><th>模块</th><th>参考行号</th></tr>
+      <tr><td><code>PermissionOnboardingApp.launch()</code> 入口</td><td>第 10-21 行</td></tr>
+      <tr><td><code>PermissionWindowController</code> 主窗口 (880x648)</td><td>第 57-95 行</td></tr>
+      <tr><td><code>PermissionCardView</code> 权限卡片</td><td>第 359-478 行</td></tr>
+      <tr><td><strong><code>DraggableAppTileView</code></strong> 可拖拽 Tile</td><td>第 1132-1213 行</td></tr>
+      <tr><td><code>PermissionAccessoryPanelController</code> 跟随浮窗</td><td>第 525-1015 行</td></tr>
+      <tr><td><code>systemSettingsWindowContext()</code> 窗口追踪 (0.15s 轮询)</td><td>第 987-1014 行</td></tr>
+      <tr><td><code>preferredPanelOrigin()</code> 位置计算</td><td>第 900-922 行</td></tr>
+      <tr><td><code>presentPanel()</code> 入场动画 (spring + bezier)</td><td>第 749-788 行</td></tr>
+    </table>
+    <p>权限检测参考: <code>packages/OpenComputerUseKit/Sources/OpenComputerUseKit/Permissions.swift</code></p>
+    <table>
+      <tr><th>模块</th><th>参考行号</th></tr>
+      <tr><td><code>PermissionDiagnostics.current()</code> 权限聚合</td><td>第 71-86 行</td></tr>
+      <tr><td><code>TCCDatabase</code> — SQLite 直读 TCC.db</td><td>第 486-546 行</td></tr>
+      <tr><td><code>SystemPermissionKind.settingsURL</code> 系统设置跳转</td><td>第 30-35 行</td></tr>
+      <tr><td><code>SystemPermissionKind.dragInstruction</code> 拖拽文案</td><td>第 39-45 行</td></tr>
+      <tr><td><code>PermissionSupport.currentAppBundleURL()</code> .app 查找</td><td>第 135-143 行</td></tr>
+    </table>
+    <h3>5. install.sh</h3>
+    <p>首次安装脚本：复制 .app 到 <code>/Applications</code>，注册 Gatekeeper 信任，创建 CLI 软链接。</p>
+    <pre><code>#!/usr/bin/env bash
+set -euo pipefail
+APP_NAME="YourTool"
+INSTALL_DIR="/Applications/${APP_NAME}.app"
+
+cp -R "$(dirname "$0")/${APP_NAME}.app" "${INSTALL_DIR}"
+sudo spctl --add --label "${APP_NAME}" "${INSTALL_DIR}"
+sudo ln -sf "${INSTALL_DIR}/Contents/MacOS/your-tool-cli" "/usr/local/bin/your-tool"
+echo "Done. Run: your-tool doctor"</code></pre>
+    <p><code>spctl --add --label</code> 是核心 — 告诉 Gatekeeper 信任此 app，Apple Development 证书签的 .app 首次启动不弹警告。只在首次安装执行一次。</p>
+    <h3>6. OSS 分发</h3>
+    <p>CI 产出 <code>your-tool-{version}-macos.zip</code>，含 <code>YourTool.app/</code> 和 <code>install.sh</code>。</p>
+    <h2>渐进交付</h2>
+    <table>
+      <tr><th>阶段</th><th>内容</th><th>用户价值</th></tr>
+      <tr><td>V1</td><td>.app bundle + ad-hoc 签名 + 拖拽 UI</td><td>授权不再"手动失败"</td></tr>
+      <tr><td>V2</td><td>Apple Development 免费签名</td><td>版本更新不重授权</td></tr>
+      <tr><td>V3</td><td>install.sh + <code>spctl</code> 注册</td><td>首次安装一步到位，零弹窗</td></tr>
+    </table>
+    <h2>关于 Apple Development 免费证书</h2>
+    <ul>
+      <li><strong>费用</strong>: 免费 Apple ID 即可，<strong>不需要</strong> $99/年的 Apple Developer Program</li>
+      <li><strong>获取</strong>: <a href="https://developer.apple.com/account">developer.apple.com/account</a> -> Certificates -> Apple Development</li>
+      <li><strong>TCC 稳定性</strong>: 同一张证书签名所有版本，TCC 权限永久保持</li>
+      <li><strong>局限</strong>: 证书有效期 1 年，到期需续签重发</li>
+      <li><strong>与 ad-hoc 对比</strong>: ad-hoc 每次 rebuild 身份变化 -> 每次更新都要重授权；Apple Development 稳定一年，体验质变</li>
+    </ul>
+  </article>
+</body>
+</html>

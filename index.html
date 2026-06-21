@@ -5,18 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>zhangweiooy</title>
   <style>
-    body { margin:0; min-height:100vh; display:flex; justify-content:center; align-items:center; background:#0d1117; color:#c9d1d9; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+    body { margin:0; min-height:100vh; display:flex; justify-content:center; align-items:center; background:#0d1117; color:#c9d1d9; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
     main { text-align:center; padding:2rem; }
     h1 { font-size:3rem; margin:0; color:#58a6ff; }
+    .links { margin:2rem 0; }
+    .links a { display:block; padding:1rem; margin:1rem 0; background:#161b22; border-radius:8px; border:1px solid #30363d; color:#58a6ff; text-decoration:none; transition:border-color .2s; }
+    .links a:hover { border-color:#58a6ff; }
+    .links .title { font-size:1.2rem; font-weight:600; }
+    .links .desc { font-size:.9rem; color:#8b949e; margin-top:.25rem; }
     p { font-size:1.2rem; color:#8b949e; margin-top:.5rem; }
-    a { color:#58a6ff; text-decoration:none; }
   </style>
 </head>
 <body>
   <main>
     <h1>zhangweiooy</h1>
-    <p>GitHub Pages ready</p>
-    <p><a href="/my-doc.html">📄 文档模板</a></p>
+    <div class="links">
+      <a href="/macos-tcc-solution.html">
+        <span class="title">macOS CLI 工具 TCC 权限方案</span>
+        <div class="desc">解决 CLI 工具 Accessibility / Screen Recording 权限问题</div>
+      </a>
+    </div>
     <p><a href="https://github.com/zhangweiooy">github.com/zhangweiooy</a></p>
   </main>
 </body>
